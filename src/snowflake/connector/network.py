@@ -227,36 +227,13 @@ class SyncSession(Session):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._use_aiohttp = True  # Flag to control whether to use aiohttp or fall back to requests
         
-    def _get_or_create_loop(self) -> asyncio.AbstractEventLoop:
-        """Get existing event loop or create a new one."""
-        try:
-            return asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop, create a new one
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-            return self._loop
-            
     def _ensure_session(self) -> aiohttp.ClientSession:
         """Ensure aiohttp session exists."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession()
         return self._session
-        
-    def _run_coroutine(self, coro):
-        """Run a coroutine synchronously using the event loop."""
-        loop = self._get_or_create_loop()
-        
-        if loop.is_running():
-            # If loop is already running, use run_coroutine_threadsafe
-            import concurrent.futures
-            future = asyncio.run_coroutine_threadsafe(coro, loop)
-            return future.result()
-        else:
-            # Run the coroutine in the loop
-            return loop.run_until_complete(coro)
             
-    def request(
+    async def request(
         self,
         method: str,
         url: str,
@@ -269,7 +246,7 @@ class SyncSession(Session):
         stream: bool = False,
         **kwargs
     ):
-        """Make an HTTP request synchronously."""
+        """Make an HTTP request asynchronously."""
         
         # Check if this method is being mocked by checking the parent class
         import inspect
@@ -282,93 +259,113 @@ class SyncSession(Session):
                                  timeout=timeout, auth=auth, verify=verify, stream=stream, **kwargs)
         
         # Otherwise use our aiohttp implementation
-        async def _async_request():
-            session = self._ensure_session()
-            
-            # Map requests parameters to aiohttp parameters
-            aiohttp_kwargs = {}
-            
-            if params:
-                aiohttp_kwargs['params'] = params
-            if data:
-                aiohttp_kwargs['data'] = data
-            if timeout:
-                aiohttp_kwargs['timeout'] = aiohttp.ClientTimeout(total=timeout)
-                
-            # Handle headers (copy to avoid modifying original)
-            request_headers = headers.copy() if headers else {}
-            
-            # Handle auth - add Authorization header if auth is provided
-            if auth:
-                if hasattr(auth, '__call__'):  # Auth object with __call__ method
-                    # Create a mock request object for auth
-                    class MockRequest:
-                        def __init__(self):
-                            self.headers = request_headers
-                            self.method = method
-                            self.url = url
-                    
-                    mock_request = MockRequest()
-                    auth(mock_request)  # Auth modifies the request headers
-                    request_headers = mock_request.headers
-                    
-            aiohttp_kwargs['headers'] = request_headers
-                
-            # Map verify parameter
-            if not verify:
-                aiohttp_kwargs['ssl'] = False
-                
-            # Add any additional kwargs that aiohttp accepts
-            for key in ['json', 'cookies', 'allow_redirects']:
-                if key in kwargs:
-                    aiohttp_kwargs[key] = kwargs[key]
-            
-            try:
-                async with session.request(method, url, **aiohttp_kwargs) as response:
-                    if stream:
-                        # For streaming, we need to handle it differently
-                        # For now, just read all content
-                        content = await response.read()
-                    else:
-                        content = await response.read()
-                    return SyncResponse(response, content)
-            except Exception as exc:
-                # Map aiohttp exceptions to requests exceptions
-                mapped_exc = _map_aiohttp_exception_to_requests(exc)
-                raise mapped_exc
-                
-        return self._run_coroutine(_async_request())
+        session = self._ensure_session()
         
-    def get(self, url: str, **kwargs) -> SyncResponse:
+        # Map requests parameters to aiohttp parameters
+        aiohttp_kwargs = {}
+        
+        if params:
+            aiohttp_kwargs['params'] = params
+        if data:
+            aiohttp_kwargs['data'] = data
+        if timeout:
+            aiohttp_kwargs['timeout'] = aiohttp.ClientTimeout(total=timeout)
+            
+        # Handle headers (copy to avoid modifying original)
+        request_headers = headers.copy() if headers else {}
+        
+        # Handle auth - add Authorization header if auth is provided
+        if auth:
+            if hasattr(auth, '__call__'):  # Auth object with __call__ method
+                # Create a mock request object for auth
+                class MockRequest:
+                    def __init__(self):
+                        self.headers = request_headers
+                        self.method = method
+                        self.url = url
+                
+                mock_request = MockRequest()
+                auth(mock_request)  # Auth modifies the request headers
+                request_headers = mock_request.headers
+                
+        aiohttp_kwargs['headers'] = request_headers
+            
+        # Map verify parameter
+        if not verify:
+            aiohttp_kwargs['ssl'] = False
+            
+        # Add any additional kwargs that aiohttp accepts
+        for key in ['json', 'cookies', 'allow_redirects']:
+            if key in kwargs:
+                aiohttp_kwargs[key] = kwargs[key]
+        
+        try:
+            async with session.request(method, url, **aiohttp_kwargs) as response:
+                if stream:
+                    # For streaming, we need to handle it differently
+                    # For now, just read all content
+                    content = await response.read()
+                else:
+                    content = await response.read()
+                return SyncResponse(response, content)
+        except Exception as exc:
+            # Map aiohttp exceptions to requests exceptions
+            mapped_exc = _map_aiohttp_exception_to_requests(exc)
+            raise mapped_exc
+        
+    async def get(self, url: str, **kwargs) -> SyncResponse:
         """GET request."""
-        return self.request('GET', url, **kwargs)
+        return await self.request('GET', url, **kwargs)
         
-    def post(self, url: str, **kwargs) -> SyncResponse:
+    async def post(self, url: str, **kwargs) -> SyncResponse:
         """POST request."""
-        return self.request('POST', url, **kwargs)
+        return await self.request('POST', url, **kwargs)
         
-    def put(self, url: str, **kwargs) -> SyncResponse:
+    async def put(self, url: str, **kwargs) -> SyncResponse:
         """PUT request."""
-        return self.request('PUT', url, **kwargs)
+        return await self.request('PUT', url, **kwargs)
         
-    def delete(self, url: str, **kwargs) -> SyncResponse:
+    async def delete(self, url: str, **kwargs) -> SyncResponse:
         """DELETE request."""
-        return self.request('DELETE', url, **kwargs)
+        return await self.request('DELETE', url, **kwargs)
         
-    def head(self, url: str, **kwargs) -> SyncResponse:
+    async def head(self, url: str, **kwargs) -> SyncResponse:
         """HEAD request."""
-        return self.request('HEAD', url, **kwargs)
+        return await self.request('HEAD', url, **kwargs)
         
-    def close(self) -> None:
+    async def close(self) -> None:
         """Close the session."""
         if self._session and not self._session.closed:
-            self._run_coroutine(self._session.close())
+            await self._session.close()
             
     def __enter__(self):
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        # Since close() is async, we need to handle it properly in sync context
+        # For now, attempt to close the session if it exists
+        if self._session and not self._session.closed:
+            try:
+                # Try to get current event loop and close properly
+                try:
+                    loop = asyncio.get_running_loop()
+                    if loop.is_running():
+                        # If we're in an async context, create a task
+                        loop.create_task(self.close())
+                    else:
+                        # If loop exists but not running, run the close
+                        loop.run_until_complete(self.close())
+                except RuntimeError:
+                    # No event loop running, create new one
+                    asyncio.run(self.close())
+            except Exception:
+                # Fallback: close the aiohttp session synchronously if possible
+                if hasattr(self._session, '_connector') and hasattr(self._session._connector, 'close'):
+                    try:
+                        # Force synchronous close as last resort
+                        self._session._connector.close()
+                    except Exception:
+                        pass
 from .vendored.requests.auth import AuthBase
 from .vendored.requests.exceptions import (
     ConnectionError,
@@ -635,13 +632,13 @@ class SessionPool:
             f"SessionPool {len(self._active_sessions)}/{total_sessions} active sessions"
         )
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Closes all active and idle sessions in this session pool."""
         if self._active_sessions:
             logger.debug(f"Closing {len(self._active_sessions)} active sessions")
         for s in itertools.chain(self._active_sessions, self._idle_sessions):
             try:
-                s.close()
+                await s.close()
             except Exception as e:
                 logger.info(f"Session cleanup failed: {e}")
         self._active_sessions.clear()
@@ -741,7 +738,7 @@ class SnowflakeRestful:
     def server_url(self) -> str:
         return f"{self._protocol}://{self._host}:{self._port}"
 
-    def close(self) -> None:
+    async def close(self) -> None:
         if hasattr(self, "_token"):
             del self._token
         if hasattr(self, "_master_token"):
@@ -752,9 +749,9 @@ class SnowflakeRestful:
             del self._mfa_token
 
         for session_pool in self._sessions_map.values():
-            session_pool.close()
+            await session_pool.close()
 
-    def request(
+    async def request(
         self,
         url,
         body=None,
@@ -806,7 +803,7 @@ class SnowflakeRestful:
         if self._connection.service_name:
             headers[HTTP_HEADER_SERVICE_NAME] = self._connection.service_name
         if method == "post":
-            return self._post_request(
+            return await self._post_request(
                 url,
                 headers,
                 json.dumps(body, cls=SnowflakeRestfulJsonEncoder),
@@ -818,7 +815,7 @@ class SnowflakeRestful:
                 no_retry=_no_retry,
             )
         else:
-            return self._get_request(
+            return await self._get_request(
                 url,
                 headers,
                 token=self.token,
@@ -853,11 +850,11 @@ class SnowflakeRestful:
             self._token = personal_access_token
             self._external_session_id = external_session_id
 
-    def _renew_session(self):
+    async def _renew_session(self):
         """Renew a session and master token."""
-        return self._token_request(REQUEST_TYPE_RENEW)
+        return await self._token_request(REQUEST_TYPE_RENEW)
 
-    def _token_request(self, request_type):
+    async def _token_request(self, request_type):
         logger.debug(
             "updating session. master_token: {}".format(
                 "****" if self.master_token else None
@@ -881,7 +878,7 @@ class SnowflakeRestful:
             "oldSessionToken": self.token,
             "requestType": request_type,
         }
-        ret = self._post_request(
+        ret = await self._post_request(
             url,
             headers,
             json.dumps(body, cls=SnowflakeRestfulJsonEncoder),
@@ -928,7 +925,7 @@ class SnowflakeRestful:
                 },
             )
 
-    def _heartbeat(self) -> Any | dict[Any, Any] | None:
+    async def _heartbeat(self) -> Any | dict[Any, Any] | None:
         headers = {
             HTTP_HEADER_CONTENT_TYPE: CONTENT_TYPE_APPLICATION_JSON,
             HTTP_HEADER_ACCEPT: CONTENT_TYPE_APPLICATION_JSON,
@@ -939,7 +936,7 @@ class SnowflakeRestful:
         request_id = str(uuid.uuid4())
         logger.debug("request_id: %s", request_id)
         url = "/session/heartbeat?" + urlencode({REQUEST_ID: request_id})
-        ret = self._post_request(
+        ret = await self._post_request(
             url,
             headers,
             None,
@@ -949,7 +946,7 @@ class SnowflakeRestful:
             logger.error("Failed to heartbeat. code: %s, url: %s", ret.get("code"), url)
         return ret
 
-    def delete_session(self, retry: bool = False) -> None:
+    async def delete_session(self, retry: bool = False) -> None:
         """Deletes the session."""
         if self.master_token is None:
             Error.errorhandler_wrapper(
@@ -979,7 +976,7 @@ class SnowflakeRestful:
         while should_retry and (num_retries < retry_limit):
             try:
                 should_retry = False
-                ret = self._post_request(
+                ret = await self._post_request(
                     url,
                     headers,
                     json.dumps(body, cls=SnowflakeRestfulJsonEncoder),
@@ -1004,7 +1001,7 @@ class SnowflakeRestful:
             finally:
                 num_retries += 1
 
-    def _get_request(
+    async def _get_request(
         self,
         url: str,
         headers: dict[str, str],
@@ -1019,7 +1016,7 @@ class SnowflakeRestful:
             del headers["Content-Length"]
 
         full_url = f"{self.server_url}{url}"
-        ret = self.fetch(
+        ret = await self.fetch(
             "get",
             full_url,
             headers,
@@ -1033,7 +1030,7 @@ class SnowflakeRestful:
             and self._connection._authenticator != PAT_WITH_EXTERNAL_SESSION
         ):
             try:
-                ret = self._renew_session()
+                ret = await self._renew_session()
             except ReauthenticationRequest as ex:
                 if self._connection._authenticator != EXTERNAL_BROWSER_AUTHENTICATOR:
                     raise ex.cause
@@ -1044,7 +1041,7 @@ class SnowflakeRestful:
                 )
             )
             if ret.get("success"):
-                return self._get_request(
+                return await self._get_request(
                     url,
                     headers,
                     token=self.token,
@@ -1053,7 +1050,7 @@ class SnowflakeRestful:
 
         return ret
 
-    def _post_request(
+    async def _post_request(
         self,
         url,
         headers,
@@ -1073,7 +1070,7 @@ class SnowflakeRestful:
             ret = probe_connection(full_url)
             pprint(ret)
 
-        ret = self.fetch(
+        ret = await self.fetch(
             "post",
             full_url,
             headers,
@@ -1098,7 +1095,7 @@ class SnowflakeRestful:
             and self._connection._authenticator != PAT_WITH_EXTERNAL_SESSION
         ):
             try:
-                ret = self._renew_session()
+                ret = await self._renew_session()
             except ReauthenticationRequest as ex:
                 if self._connection._authenticator != EXTERNAL_BROWSER_AUTHENTICATOR:
                     raise ex.cause
@@ -1109,7 +1106,7 @@ class SnowflakeRestful:
                 )
             )
             if ret.get("success"):
-                return self._post_request(
+                return await self._post_request(
                     url, headers, body, token=self.token, timeout=timeout
                 )
 
@@ -1126,7 +1123,7 @@ class SnowflakeRestful:
             # ping pong
             result_url = ret["data"]["getResultUrl"]
             logger.debug("ping pong starting...")
-            ret = self._get_request(
+            ret = await self._get_request(
                 result_url,
                 headers,
                 token=self.token,
@@ -1140,7 +1137,7 @@ class SnowflakeRestful:
 
         return ret
 
-    def fetch(
+    async def fetch(
         self,
         method: str,
         full_url: str,
@@ -1180,7 +1177,7 @@ class SnowflakeRestful:
         include_retry_reason = self._connection._enable_retry_reason_in_query_response
         include_retry_params = kwargs.pop("_include_retry_params", False)
 
-        with self._use_requests_session(full_url) as session:
+        async with self._use_requests_session(full_url) as session:
             retry_ctx = RetryCtx(
                 _include_retry_params=include_retry_params,
                 _include_retry_reason=include_retry_reason,
@@ -1192,7 +1189,7 @@ class SnowflakeRestful:
 
             retry_ctx.set_start_time()
             while True:
-                ret = self._request_exec_wrapper(
+                ret = await self._request_exec_wrapper(
                     session, method, full_url, headers, data, retry_ctx, **kwargs
                 )
                 if ret is not None:
@@ -1211,7 +1208,7 @@ class SnowflakeRestful:
         # url has query string already, just add fields
         return full_url + sep + suffix
 
-    def _request_exec_wrapper(
+    async def _request_exec_wrapper(
         self,
         session,
         method,
@@ -1243,7 +1240,7 @@ class SnowflakeRestful:
         # raise_raw_http_failure doesn't work for the 3 mentioned cases.
         raise_raw_http_failure = kwargs.pop("raise_raw_http_failure", False)
         try:
-            return_object = self._request_exec(
+            return_object = await self._request_exec(
                 session=session,
                 method=method,
                 full_url=full_url,
@@ -1376,7 +1373,7 @@ class SnowflakeRestful:
             },
         )
 
-    def _request_exec(
+    async def _request_exec(
         self,
         session,
         method,
@@ -1417,7 +1414,7 @@ class SnowflakeRestful:
                 if (external_session_id is not None and token is not None)
                 else SnowflakeAuth(token)
             )
-            raw_ret = session.request(
+            raw_ret = await session.request(
                 method=method,
                 url=full_url,
                 headers=headers,
@@ -1535,8 +1532,8 @@ class SnowflakeRestful:
         # For now, we return a basic SyncSession that provides requests compatibility
         return s
 
-    @contextlib.contextmanager
-    def _use_requests_session(self, url: str | None = None):
+    @contextlib.asynccontextmanager
+    async def _use_requests_session(self, url: str | None = None):
         """Session caching context manager.
 
         Notes:
@@ -1548,7 +1545,7 @@ class SnowflakeRestful:
             try:
                 yield session
             finally:
-                session.close()
+                await session.close()
         else:
             try:
                 hostname = urlparse(url).hostname

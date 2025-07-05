@@ -214,3 +214,9 @@ isinstance(cause, Error)  # Type checking for Snowflake errors
 ## Utility Scripts
 
 - If you need the call graph upstream from a TARGET_FUNCTION (Valid formats include `func`, `class.func`, and `file::class.func`) call `./get_upstream.sh <TARGET_FUNCTION>`. This is useful for determining what depends on TARGET_FUNCTION. Similarly, you can do `./get_downstream.sh <TARGET_FUNCTION>`.
+```
+
+## Workflow and Development Guidelines
+
+- **Method Conversion Tracking**
+  - Whenever you convert a method from sync to async, record a reference to that method in ASYNC_CONVERSION.md in the project root, following the existing format.
